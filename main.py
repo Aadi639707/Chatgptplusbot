@@ -5,7 +5,7 @@ from groq import Groq
 from flask import Flask
 from threading import Thread
 from telebot import types
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageOps, ImageFont
 from io import BytesIO
 
 # --- Flask Setup ---
@@ -21,33 +21,42 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 def get_welcome_image(user_id, first_name):
-    # 1. Background Image (Aap is URL ko kisi bhi acche background link se badal sakte hain)
-    bg_url = "https://img.freepik.com/free-vector/abstract-technology-particle-background_23-2148426649.jpg"
+    # 1. Background Image
+    bg_url = "https://w0.peakpx.com/wallpaper/594/544/wallpaper-abstract-background-blue-and-black-3d.jpg"
     bg_resp = requests.get(bg_url)
-    bg = Image.open(BytesIO(bg_resp.content)).resize((800, 400))
+    bg = Image.open(BytesIO(bg_resp.content)).resize((800, 450))
+    draw = ImageDraw.Draw(bg)
 
     # 2. Get User Profile Photo
-    photos = bot.get_user_profile_photos(user_id)
-    if photos.total_count > 0:
-        file_info = bot.get_file(photos.photos[0][-1].file_id)
-        pfp_resp = requests.get(f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}')
-        pfp = Image.open(BytesIO(pfp_resp.content)).convert("RGBA")
-    else:
-        # Agar user ki photo nahi hai toh default image
-        pfp = Image.new('RGBA', (200, 200), color=(200, 200, 200))
+    try:
+        photos = bot.get_user_profile_photos(user_id)
+        if photos.total_count > 0:
+            file_info = bot.get_file(photos.photos[0][-1].file_id)
+            pfp_resp = requests.get(f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}')
+            pfp = Image.open(BytesIO(pfp_resp.content)).convert("RGBA")
+        else:
+            pfp = Image.new('RGBA', (200, 200), color=(100, 100, 100))
+    except:
+        pfp = Image.new('RGBA', (200, 200), color=(100, 100, 100))
 
-    # 3. Make PFP Round
-    pfp = pfp.resize((150, 150))
-    mask = Image.new('L', (150, 150), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.ellipse((0, 0, 150, 150), fill=255)
+    # 3. Make PFP Round with Border
+    size = (180, 180)
+    pfp = pfp.resize(size)
+    mask = Image.new('L', size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((0, 0, size[0], size[1]), fill=255)
     pfp = ImageOps.fit(pfp, mask.size, centering=(0.5, 0.5))
     pfp.putalpha(mask)
 
-    # 4. Paste PFP on Background
-    bg.paste(pfp, (325, 50), pfp) # Center mein paste
+    # 4. Paste PFP and Add Text
+    bg.paste(pfp, (310, 50), pfp) # PFP Center
     
-    # 5. Save to memory
+    # Text: "WELCOME [NAME]"
+    # Note: Render par default font use hoga
+    welcome_msg = f"WELCOME {first_name.upper()}"
+    draw.text((400, 280), welcome_msg, fill="white", anchor="mm")
+    draw.text((400, 320), "AI Assistant is Ready!", fill="#00ffff", anchor="mm")
+
     bio = BytesIO()
     bio.name = 'welcome.png'
     bg.save(bio, 'PNG')
@@ -66,7 +75,7 @@ def start(message):
         bot.send_photo(
             message.chat.id, 
             welcome_img, 
-            caption=f"Welcome **{message.from_user.first_name}**! How can I help you today?",
+            caption=f"Hello **{message.from_user.first_name}**! I am your AI. How can I help you?",
             reply_markup=markup,
             parse_mode="Markdown"
         )
@@ -88,4 +97,4 @@ def chat(message):
 if __name__ == "__main__":
     keep_alive()
     bot.infinity_polling(skip_pending=True)
-        
+    
