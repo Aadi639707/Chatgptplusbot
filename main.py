@@ -2,6 +2,7 @@ import os
 import telebot
 import requests
 import img2pdf
+import random
 from groq import Groq
 from flask import Flask
 from threading import Thread
@@ -9,10 +10,10 @@ from telebot import types
 from PIL import Image, ImageDraw, ImageOps
 from io import BytesIO
 
-# --- 1. Flask Server ---
+# --- 1. Flask Setup (Uptime) ---
 app = Flask('')
 @app.route('/')
-def home(): return "AI Bot is Live with Image Generation!"
+def home(): return "Bot is Online and Smart!"
 
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
@@ -22,7 +23,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-user_temp_file = {} # Temporary photo storage
+user_temp_file = {} # Memory for Smart Options
 
 # --- 3. Welcome Image Function ---
 def get_welcome_image(user_id, first_name):
@@ -52,71 +53,69 @@ def start(message):
     markup.add(types.InlineKeyboardButton("👨‍💻 Support", url="https://t.me/SANATANI_GOJO"),
                types.InlineKeyboardButton("📢 Channel", url="https://t.me/+fYOWZAXCTythZGY9"))
     img = get_welcome_image(message.from_user.id, message.from_user.first_name)
-    welcome_txt = (f"👋 Hello {message.from_user.first_name}!\n\n"
-                   "🤖 **AI Chat:** Send any message.\n"
-                   "🖼️ **Generate Image:** Use `/draw` followed by your prompt.\n"
-                   "📄 **PDF/Link:** Send a photo to get options.")
+    welcome_txt = f"👋 Hello {message.from_user.first_name}!\n\nAI Chat karein, Image banayein `/draw` se, ya Photo bhej kar PDF/Link banayein."
     if img: bot.send_photo(message.chat.id, img, caption=welcome_txt, reply_markup=markup, parse_mode="Markdown")
     else: bot.send_message(message.chat.id, welcome_txt, reply_markup=markup, parse_mode="Markdown")
 
-# --- Image Generation Command ---
+# --- Fixed Image Generation (/draw) ---
 @bot.message_handler(commands=['draw'])
 def draw_image(message):
     query = message.text.replace("/draw", "").strip()
     if not query:
-        bot.reply_to(message, "Please provide a prompt. Example: `/draw a futuristic city`", parse_mode="Markdown")
+        bot.reply_to(message, "Kripya prompt dein. Example: `/draw a white horse`", parse_mode="Markdown")
         return
 
     sent_msg = bot.reply_to(message, "🎨 Generating your image... please wait.")
-    
-    # Pollinations AI (Free Text-to-Image API)
-    image_url = f"https://pollinations.ai/p/{query.replace(' ', '%20')}?width=1080&height=1080&seed=42&model=flux"
+    seed = random.randint(1, 999999)
+    image_url = f"https://pollinations.ai/p/{query.replace(' ', '%20')}?width=1080&height=1080&seed={seed}&model=flux&nologo=true"
     
     try:
-        bot.send_photo(message.chat.id, image_url, caption=f"✨ Result for: `{query}`", parse_mode="Markdown")
+        # Image download karke bhejna (Taaki logo wala error na aaye)
+        img_data = requests.get(image_url, timeout=30).content
+        with BytesIO(img_data) as photo:
+            photo.name = 'ai_image.jpg'
+            bot.send_photo(message.chat.id, photo, caption=f"✨ Result for: `{query}`", parse_mode="Markdown")
         bot.delete_message(message.chat.id, sent_msg.message_id)
     except Exception as e:
-        print(f"Image generation error: {e}")
-        bot.edit_message_text("❌ Error generating image. Try again later.", message.chat.id, sent_msg.message_id)
+        bot.edit_message_text("❌ Server busy hai, thodi der baad try karein.", message.chat.id, sent_msg.message_id)
 
-# Photo Handler: Pehle poochega kya karna hai
+# --- Photo Smart Handler ---
 @bot.message_handler(content_types=['photo'])
-def ask_purpose(message):
+def handle_incoming_photo(message):
     user_id = message.chat.id
-    user_temp_file[user_id] = message.photo[-1].file_id # Memory mein save kiya
+    user_temp_file[user_id] = message.photo[-1].file_id 
 
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📄 Convert to PDF", callback_data="pdf"),
+    markup.add(types.InlineKeyboardButton("📄 Make PDF", callback_data="pdf"),
                types.InlineKeyboardButton("🔗 Generate Link", callback_data="link"))
     
-    bot.reply_to(message, "Aap is photo ka kya karna chahte hain?", reply_markup=markup)
+    bot.reply_to(message, "Aap is image ka kya karna chahte hain?", reply_markup=markup)
 
-# Callback Handler for Buttons
 @bot.callback_query_handler(func=lambda call: True)
-def handle_query(call):
+def callback_inline(call):
     user_id = call.message.chat.id
     if user_id not in user_temp_file:
-        bot.answer_callback_query(call.id, "Session expired! Photo phir se bhejein.")
+        bot.answer_callback_query(call.id, "Photo purani ho gayi hai!")
         return
 
     if call.data == "pdf":
-        bot.edit_message_text("⚙️ PDF bana raha hoon...", user_id, call.message.message_id)
+        bot.edit_message_text("⚙️ Creating PDF...", user_id, call.message.message_id)
         try:
             file_info = bot.get_file(user_temp_file[user_id])
             downloaded_file = bot.download_file(file_info.file_path)
             pdf_bytes = img2pdf.convert(downloaded_file)
             with BytesIO(pdf_bytes) as pdf_file:
                 pdf_file.name = "converted.pdf"
-                bot.send_document(user_id, pdf_file, caption="✅ Your PDF is ready!")
+                bot.send_document(user_id, pdf_file, caption="✅ PDF Ready!")
             bot.delete_message(user_id, call.message.message_id)
         except Exception as e:
             bot.send_message(user_id, f"❌ Error: {e}")
 
     elif call.data == "link":
         bot.edit_message_text("🔗 Link generation start...", user_id, call.message.message_id)
-        bot.send_message(user_id, "Agle update mein direct link feature active hoga. Abhi ke liye aap isse /start karke reset kar sakte hain.")
+        bot.send_message(user_id, "Ye feature update ho raha hai. Jald hi Telegraph link support milega!")
 
-# AI Chat Handler
+# --- AI Chat Handler ---
 @bot.message_handler(func=lambda message: True)
 def ai_chat(message):
     try:
@@ -127,11 +126,12 @@ def ai_chat(message):
         )
         bot.reply_to(message, response.choices[0].message.content)
     except:
-        bot.reply_to(message, "⚠️ System Busy")
+        bot.reply_to(message, "⚠️ System Busy!")
 
 # --- 5. Error-Free Execution ---
 if __name__ == "__main__":
     keep_alive()
-    print("Bot is starting safely...")
+    print("Bot is starting...")
+    # Infinity polling without multiple values error
     bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
-    
+                     
