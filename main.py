@@ -1,41 +1,47 @@
 import os
 import telebot
 from groq import Groq
+from flask import Flask
+from threading import Thread
 
-# Get keys from Environment Variables
+# Flask App (Render ko khush rakhne ke liye)
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# --- Bot Ka Asli Kaam ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 client = Groq(api_key=GROQ_API_KEY)
 
-# Command: /start
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "🚀 Groq AI Bot is Online! Ask me anything.")
+def start(message):
+    bot.reply_to(message, "I am 24/7 Online! Ask me anything.")
 
-# Command: /img (Using Pollinations as it's free)
-@bot.message_handler(commands=['img'])
-def send_image(message):
-    prompt = message.text.replace("/img", "").strip()
-    if not prompt:
-        bot.reply_to(message, "Please provide a prompt. Example: /img space cat")
-        return
-    
-    image_url = f"https://image.pollinations.ai/prompt/{prompt.replace(' ', '%20')}?nologo=true"
-    bot.send_photo(message.chat.id, image_url, caption=f"Generated: {prompt}")
-
-# Handle All Messages
 @bot.message_handler(func=lambda message: True)
-def handle_message(message):
+def chat(message):
     try:
-        chat_completion = client.chat.completions.create(
+        response = client.chat.completions.create(
             messages=[{"role": "user", "content": message.text}],
             model="llama3-8b-8192",
         )
-        bot.reply_to(message, chat_completion.choices[0].message.content)
+        bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
-        bot.reply_to(message, "⚠️ System Busy. Try again later.")
+        bot.reply_to(message, "Error: System busy.")
 
-print("Bot is starting...")
-bot.infinity_polling()
+if __name__ == "__main__":
+    keep_alive() # Web server shuru karega
+    print("Bot is running...")
+    bot.infinity_polling()
+    
