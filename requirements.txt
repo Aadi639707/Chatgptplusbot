@@ -3,3 +3,4 @@ groq
 flask
 Pillow
 requests
+img2pdf
