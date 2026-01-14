@@ -9,22 +9,23 @@ from telebot import types
 from PIL import Image, ImageDraw, ImageOps
 from io import BytesIO
 
-# --- 1. Flask Setup ---
+# --- Flask Server ---
 app = Flask('')
 @app.route('/')
-def home(): return "Smart Bot is Live!"
+def home(): return "Bot is Online and Smart!"
 
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- 2. Bot Setup ---
+# --- Setup ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-user_temp_photo = {} # Temporary photo storage
+# Temporary memory to store photo ID for callback
+user_temp_file = {}
 
-# --- 3. Welcome Image Function ---
+# --- Welcome Image Function ---
 def get_welcome_image(user_id, first_name):
     try:
         bg_url = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80"
@@ -44,7 +45,7 @@ def get_welcome_image(user_id, first_name):
         return bio
     except: return None
 
-# --- 4. Handlers ---
+# --- Handlers ---
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -56,41 +57,48 @@ def start(message):
     if img: bot.send_photo(message.chat.id, img, caption=welcome_txt, reply_markup=markup, parse_mode="Markdown")
     else: bot.send_message(message.chat.id, welcome_txt, reply_markup=markup, parse_mode="Markdown")
 
+# Photo Handler: Pehle poochega kya karna hai
 @bot.message_handler(content_types=['photo'])
-def ask_user(message):
+def ask_purpose(message):
     user_id = message.chat.id
-    user_temp_photo[user_id] = message.photo[-1].file_id
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📄 Make PDF", callback_data="make_pdf"),
-               types.InlineKeyboardButton("🔗 Get Direct Link", callback_data="get_link"))
-    
-    bot.reply_to(message, "Aap is photo ka kya karna chahte hain?", reply_markup=markup)
+    user_temp_file[user_id] = message.photo[-1].file_id # Memory mein save kiya
 
+    markup = types.InlineKeyboardMarkup()
+    btn_pdf = types.InlineKeyboardButton("📄 Convert to PDF", callback_data="pdf")
+    btn_link = types.InlineKeyboardButton("🔗 Generate Link", callback_data="link")
+    markup.add(btn_pdf, btn_link)
+
+    bot.reply_to(message, "Aap is image ka kya karna chahte hain?", reply_markup=markup)
+
+# Callback Handler for Buttons
 @bot.callback_query_handler(func=lambda call: True)
-def callback_inline(call):
+def handle_query(call):
     user_id = call.message.chat.id
-    if user_id not in user_temp_photo:
+    if user_id not in user_temp_file:
         bot.answer_callback_query(call.id, "Session expired! Photo phir se bhejein.")
         return
 
-    if call.data == "make_pdf":
-        bot.edit_message_text("⚙️ Creating PDF...", user_id, call.message.message_id)
-        file_info = bot.get_file(user_temp_photo[user_id])
-        downloaded_file = bot.download_file(file_info.file_path)
-        pdf_bytes = img2pdf.convert(downloaded_file)
-        with BytesIO(pdf_bytes) as pdf_file:
-            pdf_file.name = "converted.pdf"
-            bot.send_document(user_id, pdf_file, caption="✅ PDF Ready!")
-        bot.delete_message(user_id, call.message.message_id)
+    if call.data == "pdf":
+        bot.edit_message_text("⚙️ PDF bana raha hoon...", user_id, call.message.message_id)
+        try:
+            file_info = bot.get_file(user_temp_file[user_id])
+            downloaded_file = bot.download_file(file_info.file_path)
+            pdf_bytes = img2pdf.convert(downloaded_file)
+            with BytesIO(pdf_bytes) as pdf_file:
+                pdf_file.name = "converted.pdf"
+                bot.send_document(user_id, pdf_file, caption="✅ Your PDF is ready!")
+            bot.delete_message(user_id, call.message.message_id)
+        except Exception as e:
+            bot.send_message(user_id, f"❌ Error: {e}")
 
-    elif call.data == "get_link":
-        bot.edit_message_text("🔗 Link bana raha hoon...", user_id, call.message.message_id)
-        # Note: Asli link banane ke liye Telegraph API chahiye hoti hai, filhal ye confirmation dega
-        bot.send_message(user_id, "Feature Update: Agle update mein Telegraph link support add hoga. Abhi ke liye aap is photo par AI se baat kar sakte hain.")
+    elif call.data == "link":
+        bot.edit_message_text("🔗 Link generation start...", user_id, call.message.message_id)
+        # Telegraph/ImgBB API yahan lag sakti hai. Filhal bot rasta dikhayega:
+        bot.send_message(user_id, "Agle update mein direct link feature active hoga. Abhi ke liye aap isse /start karke reset kar sakte hain.")
 
+# AI Chat Handler
 @bot.message_handler(func=lambda message: True)
-def ai_chat(message):
+def chat(message):
     try:
         client = Groq(api_key=GROQ_API_KEY)
         response = client.chat.completions.create(
@@ -99,12 +107,11 @@ def ai_chat(message):
         )
         bot.reply_to(message, response.choices[0].message.content)
     except:
-        bot.reply_to(message, "⚠️ System Busy!")
+        bot.reply_to(message, "⚠️ System Busy")
 
-# --- 5. Error-Free Execution ---
+# --- Final Polling Fix ---
 if __name__ == "__main__":
     keep_alive()
-    print("Bot is starting safely...")
-    # FIXED LINE: No conflict, no multiple values for non_stop
+    # Konflikt aur multiple value error hatane ke liye optimized polling
     bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
-        
+    
