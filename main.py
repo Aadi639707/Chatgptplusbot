@@ -9,23 +9,22 @@ from telebot import types
 from PIL import Image, ImageDraw, ImageOps
 from io import BytesIO
 
-# --- Flask Server ---
+# --- 1. Flask Server ---
 app = Flask('')
 @app.route('/')
-def home(): return "Bot is Online and Smart!"
+def home(): return "AI Bot is Live with Image Generation!"
 
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- Setup ---
+# --- 2. Bot Setup ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Temporary memory to store photo ID for callback
-user_temp_file = {}
+user_temp_file = {} # Temporary photo storage
 
-# --- Welcome Image Function ---
+# --- 3. Welcome Image Function ---
 def get_welcome_image(user_id, first_name):
     try:
         bg_url = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80"
@@ -45,7 +44,7 @@ def get_welcome_image(user_id, first_name):
         return bio
     except: return None
 
-# --- Handlers ---
+# --- 4. Handlers ---
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -53,9 +52,32 @@ def start(message):
     markup.add(types.InlineKeyboardButton("👨‍💻 Support", url="https://t.me/SANATANI_GOJO"),
                types.InlineKeyboardButton("📢 Channel", url="https://t.me/+fYOWZAXCTythZGY9"))
     img = get_welcome_image(message.from_user.id, message.from_user.first_name)
-    welcome_txt = f"👋 Hello {message.from_user.first_name}!\n\nAI Chat ke liye message karein, ya Photo bhej kar options chunein."
+    welcome_txt = (f"👋 Hello {message.from_user.first_name}!\n\n"
+                   "🤖 **AI Chat:** Send any message.\n"
+                   "🖼️ **Generate Image:** Use `/draw` followed by your prompt.\n"
+                   "📄 **PDF/Link:** Send a photo to get options.")
     if img: bot.send_photo(message.chat.id, img, caption=welcome_txt, reply_markup=markup, parse_mode="Markdown")
     else: bot.send_message(message.chat.id, welcome_txt, reply_markup=markup, parse_mode="Markdown")
+
+# --- Image Generation Command ---
+@bot.message_handler(commands=['draw'])
+def draw_image(message):
+    query = message.text.replace("/draw", "").strip()
+    if not query:
+        bot.reply_to(message, "Please provide a prompt. Example: `/draw a futuristic city`", parse_mode="Markdown")
+        return
+
+    sent_msg = bot.reply_to(message, "🎨 Generating your image... please wait.")
+    
+    # Pollinations AI (Free Text-to-Image API)
+    image_url = f"https://pollinations.ai/p/{query.replace(' ', '%20')}?width=1080&height=1080&seed=42&model=flux"
+    
+    try:
+        bot.send_photo(message.chat.id, image_url, caption=f"✨ Result for: `{query}`", parse_mode="Markdown")
+        bot.delete_message(message.chat.id, sent_msg.message_id)
+    except Exception as e:
+        print(f"Image generation error: {e}")
+        bot.edit_message_text("❌ Error generating image. Try again later.", message.chat.id, sent_msg.message_id)
 
 # Photo Handler: Pehle poochega kya karna hai
 @bot.message_handler(content_types=['photo'])
@@ -64,11 +86,10 @@ def ask_purpose(message):
     user_temp_file[user_id] = message.photo[-1].file_id # Memory mein save kiya
 
     markup = types.InlineKeyboardMarkup()
-    btn_pdf = types.InlineKeyboardButton("📄 Convert to PDF", callback_data="pdf")
-    btn_link = types.InlineKeyboardButton("🔗 Generate Link", callback_data="link")
-    markup.add(btn_pdf, btn_link)
-
-    bot.reply_to(message, "Aap is image ka kya karna chahte hain?", reply_markup=markup)
+    markup.add(types.InlineKeyboardButton("📄 Convert to PDF", callback_data="pdf"),
+               types.InlineKeyboardButton("🔗 Generate Link", callback_data="link"))
+    
+    bot.reply_to(message, "Aap is photo ka kya karna chahte hain?", reply_markup=markup)
 
 # Callback Handler for Buttons
 @bot.callback_query_handler(func=lambda call: True)
@@ -93,12 +114,11 @@ def handle_query(call):
 
     elif call.data == "link":
         bot.edit_message_text("🔗 Link generation start...", user_id, call.message.message_id)
-        # Telegraph/ImgBB API yahan lag sakti hai. Filhal bot rasta dikhayega:
         bot.send_message(user_id, "Agle update mein direct link feature active hoga. Abhi ke liye aap isse /start karke reset kar sakte hain.")
 
 # AI Chat Handler
 @bot.message_handler(func=lambda message: True)
-def chat(message):
+def ai_chat(message):
     try:
         client = Groq(api_key=GROQ_API_KEY)
         response = client.chat.completions.create(
@@ -109,9 +129,9 @@ def chat(message):
     except:
         bot.reply_to(message, "⚠️ System Busy")
 
-# --- Final Polling Fix ---
+# --- 5. Error-Free Execution ---
 if __name__ == "__main__":
     keep_alive()
-    # Konflikt aur multiple value error hatane ke liye optimized polling
+    print("Bot is starting safely...")
     bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
     
