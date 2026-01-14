@@ -86,5 +86,7 @@ def chat(message):
 
 if __name__ == "__main__":
     keep_alive()
-    bot.infinity_polling(skip_pending=True)
-        
+    print("Bot is starting...")
+    # skip_pending=True purane messages ko ignore karega jo conflict paida karte hain
+    bot.infinity_polling(skip_pending=True, non_stop=True, timeout=60)
+    
